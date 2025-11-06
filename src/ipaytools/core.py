@@ -12,11 +12,17 @@ logger = logging.getLogger(__name__)
 class iPayTools:
     DEFAULT_CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
     DEFAULT_RPC_URL = "http://localhost:8545"
+    
+    # Safety margins
+    MIN_PROFIT_MARGIN = 0.20  # Minimum 20% profit margin
+    SAFETY_BUFFER = 1.30  # 30% safety buffer for fee calculation
+    AUTO_ADJUST_FEE = True  # Auto-adjust fee if not profitable
 
-    def __init__(self, contract_address=None, rpc_url=None):
+    def __init__(self, contract_address=None, rpc_url=None, auto_adjust_fee=True):
         # Contract address yang baru
         self.contract_address = contract_address or self.DEFAULT_CONTRACT_ADDRESS
         self.rpc_url = rpc_url or self.DEFAULT_RPC_URL
+        self.auto_adjust_fee = auto_adjust_fee
 
         # Initialize web3
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
@@ -30,6 +36,10 @@ class iPayTools:
 
         # Load contract
         self.contract = self._load_contract()
+        
+        # Auto-check and adjust fee on initialization
+        if self.auto_adjust_fee:
+            self._ensure_profitable_fee()
 
     def _load_contract(self):
         """Load contract dengan ABI yang benar"""
@@ -240,17 +250,167 @@ class iPayTools:
             logger.error(f"❌ Get developer earnings failed: {e}")
             return 0
 
-    def use_tool(self, value_eth=0.0001):
-        """Use a tool (pay fee)"""
+    def _calculate_minimum_profitable_fee(self):
+        """Calculate minimum fee yang profitable dengan current gas price"""
+        try:
+            # Get current gas price
+            gas_price = self.w3.eth.gas_price
+            
+            # Estimate gas untuk useTool (dari testing: ~94,290 gas)
+            estimated_gas = 100000  # Round up untuk safety
+            
+            # Calculate gas cost
+            gas_cost_wei = estimated_gas * gas_price
+            gas_cost_eth = float(self.w3.from_wei(gas_cost_wei, 'ether'))
+            
+            # iPay mendapat 70% dari fee
+            # Untuk profit: iPay_revenue > gas_cost
+            # fee * 0.7 > gas_cost
+            # fee > gas_cost / 0.7
+            min_fee_eth = gas_cost_eth / 0.7
+            
+            # Add safety buffer (30%)
+            safe_fee_eth = min_fee_eth * self.SAFETY_BUFFER
+            
+            # Convert to wei
+            safe_fee_wei = self.w3.to_wei(safe_fee_eth, 'ether')
+            
+            return safe_fee_wei, safe_fee_eth, gas_cost_eth
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to calculate minimum fee: {e}")
+            return None, None, None
+    
+    def _is_fee_profitable(self, fee_wei=None):
+        """Check apakah fee saat ini profitable"""
+        try:
+            if fee_wei is None:
+                fee_wei = self.contract.functions.feePerUse().call()
+            
+            fee_eth = float(self.w3.from_wei(fee_wei, 'ether'))
+            
+            # Get gas cost
+            gas_price = self.w3.eth.gas_price
+            estimated_gas = 100000
+            gas_cost_wei = estimated_gas * gas_price
+            gas_cost_eth = float(self.w3.from_wei(gas_cost_wei, 'ether'))
+            
+            # Calculate iPay revenue and profit
+            iPay_revenue = fee_eth * 0.7
+            iPay_profit = iPay_revenue - gas_cost_eth
+            
+            # Check profit margin
+            if iPay_profit <= 0:
+                return False, iPay_profit, 0
+            
+            profit_margin = (iPay_profit / iPay_revenue) * 100
+            
+            # Require minimum profit margin
+            is_profitable = profit_margin >= (self.MIN_PROFIT_MARGIN * 100)
+            
+            return is_profitable, iPay_profit, profit_margin
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to check profitability: {e}")
+            return False, 0, 0
+    
+    def _ensure_profitable_fee(self):
+        """Ensure fee is profitable, auto-adjust if needed and possible"""
+        try:
+            # Check current fee
+            current_fee_wei = self.contract.functions.feePerUse().call()
+            is_profitable, profit, margin = self._is_fee_profitable(current_fee_wei)
+            
+            if is_profitable:
+                logger.info(f"✅ Current fee is profitable (margin: {margin:.1f}%)")
+                return True
+            
+            logger.warning(f"⚠️  Current fee is NOT profitable (profit: {profit:+.6f} ETH)")
+            
+            # Calculate minimum profitable fee
+            min_fee_wei, min_fee_eth, gas_cost = self._calculate_minimum_profitable_fee()
+            
+            if min_fee_wei is None:
+                logger.error("❌ Cannot calculate minimum fee")
+                return False
+            
+            logger.info(f"💡 Recommended fee: {min_fee_eth:.6f} ETH (gas cost: {gas_cost:.6f} ETH)")
+            
+            # Try to auto-adjust if we're the owner
+            owner = self.contract.functions.owner().call()
+            if owner.lower() == self.account.lower():
+                logger.info(f"🔄 Auto-adjusting fee to {min_fee_eth:.6f} ETH...")
+                
+                transaction = {
+                    'from': self.account,
+                    'gas': 100000,
+                    'gasPrice': self.w3.eth.gas_price
+                }
+                
+                tx_hash = self.contract.functions.setFeePerUse(min_fee_wei).transact(transaction)
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                
+                if receipt.status == 1:
+                    logger.info(f"✅ Fee auto-adjusted successfully!")
+                    return True
+                else:
+                    logger.error(f"❌ Fee adjustment failed")
+                    return False
+            else:
+                logger.warning(f"⚠️  Not contract owner, cannot auto-adjust fee")
+                logger.warning(f"⚠️  Please contact owner to update fee to at least {min_fee_eth:.6f} ETH")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to ensure profitable fee: {e}")
+            return False
+    
+    def use_tool(self, value_eth=None):
+        """Use a tool (pay fee) - WITH PROFITABILITY CHECK"""
         if not self.account:
             raise Exception("No account available")
 
         try:
-            value_wei = self.w3.to_wei(value_eth, 'ether')
+            # ALWAYS get latest fee from contract
+            fee_wei = self.contract.functions.feePerUse().call()
+            fee_eth = float(self.w3.from_wei(fee_wei, 'ether'))
+            
+            # CRITICAL: Check profitability BEFORE transaction
+            is_profitable, profit, margin = self._is_fee_profitable(fee_wei)
+            
+            if not is_profitable:
+                logger.error(f"❌ TRANSACTION REJECTED: Fee is not profitable!")
+                logger.error(f"   Current fee: {fee_eth:.6f} ETH")
+                logger.error(f"   iPay profit: {profit:+.6f} ETH")
+                logger.error(f"   System would LOSE money on this transaction!")
+                
+                # Try to auto-adjust fee
+                if self.auto_adjust_fee:
+                    logger.info(f"🔄 Attempting to auto-adjust fee...")
+                    if self._ensure_profitable_fee():
+                        # Get updated fee after adjustment
+                        fee_wei = self.contract.functions.feePerUse().call()
+                        fee_eth = float(self.w3.from_wei(fee_wei, 'ether'))
+                        logger.info(f"✅ Fee adjusted to {fee_eth:.6f} ETH, retrying transaction...")
+                        
+                        # Re-check profitability
+                        is_profitable, profit, margin = self._is_fee_profitable(fee_wei)
+                        if not is_profitable:
+                            raise Exception("Transaction rejected: Fee is still not profitable after adjustment")
+                    else:
+                        raise Exception("Transaction rejected: Fee is not profitable and cannot be auto-adjusted")
+                else:
+                    raise Exception("Transaction rejected: Fee is not profitable")
+            
+            logger.info(f"✅ Profitability check passed (margin: {margin:.1f}%)")
+            
+            # ALWAYS use the contract fee (ignore value_eth parameter)
+            # This ensures we always pay the correct amount
+            value_wei = fee_wei
             
             transaction = {
                 'from': self.account,
-                'value': value_wei,  # ✅ Hanya useTool yang butuh value
+                'value': value_wei,
                 'gas': 200000,
                 'gasPrice': self.w3.eth.gas_price
             }
@@ -258,11 +418,16 @@ class iPayTools:
             tx_hash = self.contract.functions.useTool().transact(transaction)
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
             
-            return receipt.status == 1
+            if receipt.status == 1:
+                logger.info(f"✅ Transaction successful! Gas used: {receipt.gasUsed}")
+                return True
+            else:
+                logger.error(f"❌ Transaction failed")
+                return False
             
         except Exception as e:
             logger.error(f"❌ Use tool failed: {e}")
-            return False
+            raise
 
     def withdraw_earnings(self):
         """Withdraw developer earnings"""
