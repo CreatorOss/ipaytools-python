@@ -25,3 +25,17 @@
 - Semua test anti-loss protection passed
 - Profitability verification working
 - System sekarang aman dari kerugian
+
+## v0.3.0 ($(date +%Y-%m-%d))
+### ANTI-RUGI REAL-TIME SYSTEM
+- **SETIAP transaksi check current gas price**
+- **Real-time minimum fee calculation** 
+- **Safety buffers: 20% gas price, 30% gas estimate**
+- **Auto-rejection untuk unprofitable transactions**
+- **Method baru: use_tool_safe() untuk maximum protection**
+
+### Features
+- get_current_gas_price() dengan safety buffer
+- calculate_minimum_profitable_fee() real-time  
+- use_tool_safe() - metode ANTI-RUGI
+- Enhanced profitability checks
