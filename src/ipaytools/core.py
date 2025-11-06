@@ -47,7 +47,7 @@ class iPayTools:
             self._ensure_profitable_fee()
 
     def _load_contract(self):
-        """Load contract dengan ABI yang lebih kompatibel"""
+        """Load contract dengan hanya function yang tersedia"""
         abi = [
             {
                 "inputs": [],
@@ -76,27 +76,6 @@ class iPayTools:
                 "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
                 "stateMutability": "view",
                 "type": "function"
-            },
-            {
-                "inputs": [],
-                "name": "withdrawEarnings",
-                "outputs": [],
-                "stateMutability": "nonpayable",
-                "type": "function"
-            },
-            {
-                "inputs": [{"internalType": "string", "name": "data", "type": "string"}],
-                "name": "useTool",
-                "outputs": [],
-                "stateMutability": "payable",
-                "type": "function"
-            },
-            {
-                "inputs": [{"internalType": "string", "name": "appName", "type": "string"}],
-                "name": "registerApp",
-                "outputs": [],
-                "stateMutability": "nonpayable",
-                "type": "function"
             }
         ]
         
@@ -116,48 +95,28 @@ class iPayTools:
             self.logger.warning(f"Gas price check failed, using default: {e}")
             return self.w3.to_wei(1, 'gwei')
 
-    def estimate_gas_safe(self, value_wei=0):
-        """Safe gas estimation dengan fallback"""
+    def estimate_gas_for_transaction(self, value_wei=0):
+        """Estimate gas untuk transaction ke contract"""
         try:
-            # Coba berbagai function yang mungkin ada
-            functions_to_try = [
-                lambda: self.contract.functions.useTool("").estimate_gas({
-                    'from': self.account,
-                    'value': value_wei
-                }),
-                lambda: self.contract.functions.useTool("test").estimate_gas({
-                    'from': self.account, 
-                    'value': value_wei
-                }),
-                lambda: self.w3.eth.estimate_gas({
-                    'from': self.account,
-                    'to': self.contract_address,
-                    'value': value_wei,
-                    'data': '0x'
-                })
-            ]
-            
-            for gas_func in functions_to_try:
-                try:
-                    gas_estimate = gas_func()
-                    self.logger.info(f"🔧 Gas estimate successful: {gas_estimate}")
-                    return gas_estimate
-                except Exception:
-                    continue
-                    
-            self.logger.warning("All gas estimation methods failed, using default: 50000")
-            return 50000
-            
+            # Estimate gas untuk transaction ke contract address
+            gas_estimate = self.w3.eth.estimate_gas({
+                'from': self.account,
+                'to': self.contract_address,
+                'value': value_wei,
+                'data': '0x'  # empty data - hanya transfer ETH
+            })
+            self.logger.info(f"🔧 Gas estimate successful: {gas_estimate}")
+            return gas_estimate
         except Exception as e:
             self.logger.warning(f"Gas estimation failed, using default: {e}")
-            return 50000
+            return 50000  # Default gas estimate
 
     def calculate_minimum_profitable_fee(self):
         """Calculate minimum fee yang profitable berdasarkan current gas price"""
         gas_price = self.get_current_gas_price()
         
-        # Estimate gas usage dengan method yang safe
-        base_gas_estimate = self.estimate_gas_safe()
+        # Estimate gas usage
+        base_gas_estimate = self.estimate_gas_for_transaction()
         
         # Tambah 30% safety buffer untuk gas estimation
         safe_gas_estimate = base_gas_estimate * 130 // 100
@@ -188,7 +147,7 @@ class iPayTools:
         if is_profitable:
             try:
                 gas_price = self.get_current_gas_price()
-                gas_estimate = self.estimate_gas_safe(fee_wei)
+                gas_estimate = self.estimate_gas_for_transaction(fee_wei)
                 gas_cost = gas_estimate * gas_price
                 ipay_revenue = fee_wei * 70 // 100
                 ipay_profit = ipay_revenue - gas_cost
@@ -228,8 +187,8 @@ class iPayTools:
         except Exception as e:
             self.logger.error(f"❌ Fee adjustment failed: {e}")
 
-    def use_tool_safe(self, data="", value_eth=None):
-        """Use tool dengan REAL-TIME safety check - ANTI RUGI"""
+    def use_tool_safe(self, value_eth=None):
+        """Safe transaction method - tanpa function call, hanya transfer ETH"""
         try:
             # 1. Get current gas price
             gas_price = self.get_current_gas_price()
@@ -253,8 +212,8 @@ class iPayTools:
                 self.logger.error(f"   System would LOSE money on this transaction!")
                 raise Exception(f"Transaction rejected: Fee is not profitable (need {required_fee_eth:.6f} ETH)")
             
-            # 5. Estimate gas dengan method yang safe
-            gas_estimate = self.estimate_gas_safe(value_wei)
+            # 5. Estimate gas
+            gas_estimate = self.estimate_gas_for_transaction(value_wei)
             
             # 6. Calculate final cost
             total_gas_cost = gas_estimate * gas_price
@@ -272,10 +231,11 @@ class iPayTools:
             self.logger.info(f"   iPay profit: {self.w3.from_wei(ipay_profit, 'ether'):.6f} ETH")
             self.logger.info(f"   Profit margin: {profit_margin:.1f}%")
             
-            # 7. Execute transaction
+            # 7. Execute transaction (hanya transfer ETH, tanpa function call)
             try:
-                tx_hash = self.contract.functions.useTool(data).transact({
+                tx_hash = self.w3.eth.send_transaction({
                     'from': self.account,
+                    'to': self.contract_address,
                     'value': value_wei,
                     'gas': gas_estimate * 150 // 100,
                     'gasPrice': gas_price
@@ -318,11 +278,6 @@ class iPayTools:
         """Check if address is registered"""
         return True
 
-    def register_app(self, app_name=None):
-        """Register app - placeholder implementation"""
-        self.logger.info("📝 App registration called")
-        return True
-
     def get_contract_balance(self):
         """Get contract balance"""
         return self.w3.eth.get_balance(self.contract_address)
@@ -352,7 +307,7 @@ def quick_start_demo():
         
         # Test safe transaction
         try:
-            result = tools.use_tool_safe("test_data")
+            result = tools.use_tool_safe()
             print("✅ Safe transaction completed!")
         except Exception as e:
             print(f"🛡️ Transaction rejected (SAFE): {e}")

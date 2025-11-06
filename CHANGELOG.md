@@ -39,3 +39,16 @@
 - calculate_minimum_profitable_fee() real-time  
 - use_tool_safe() - metode ANTI-RUGI
 - Enhanced profitability checks
+
+## v0.3.3 ($(date +%Y-%m-%d))
+### Contract Compatibility Fix
+- **Fixed contract compatibility** - hanya menggunakan function yang tersedia
+- **Simplified transaction** - tanpa function call, hanya transfer ETH
+- **Enhanced gas estimation** - menggunakan estimate_gas dasar
+- **Better error handling** - untuk berbagai scenario contract
+
+### Features
+- Tetap maintain anti-rugi protection
+- Real-time gas price checking
+- Profitability validation
+- Safe transaction execution

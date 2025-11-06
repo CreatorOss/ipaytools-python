@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="ipaytools",
-    version="0.3.0",  # ⬅️ Naikkan version
+    version="0.3.3",  # ⬅️ Naikkan version
     author="Benny Harianto",
     author_email="creatoropensource@gmail.com", 
     description="Python SDK for iPayTools - Ethereum smart contract integration for payment processing",
