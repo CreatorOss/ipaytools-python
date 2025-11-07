@@ -3,45 +3,36 @@ from setuptools import setup, find_packages
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
+with open("requirements.txt", "r", encoding="utf-8") as fh:
+    requirements = fh.read().splitlines()
+
 setup(
     name="ipaytools",
-    version="0.3.3",  # ⬅️ Naikkan version
+    version="0.3.4",
     author="Benny Harianto",
-    author_email="creatoropensource@gmail.com", 
-    description="Python SDK for iPayTools - Ethereum smart contract integration for payment processing",
+    author_email="creatoropensource@gmail.com",
+    description="Python SDK for iPayTools - Ethereum smart contract integration with BRICS multi-currency support",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/bennyharianto/ipaytools-python",  # ⬅️ Ganti dengan repo Anda
-    project_urls={
-        "Bug Tracker": "https://github.com/bennyharianto/ipaytools-python/issues",
-        "Documentation": "https://github.com/bennyharianto/ipaytools-python#readme",
-        "Source Code": "https://github.com/bennyharianto/ipaytools-python",
-    },
-    package_dir={"": "src"},
+    url="https://github.com/bennyharianto/ipaytools-python",
     packages=find_packages(where="src"),
+    package_dir={"": "src"},
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "Intended Audience :: Financial and Insurance Industry", 
+        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: Office/Business :: Financial",
     ],
     python_requires=">=3.8",
-    install_requires=["web3>=6.0.0"],
-    keywords=[
-        "ethereum",
-        "web3", 
-        "smart-contract",
-        "blockchain",
-        "payments",
-        "defi",
-        "ipaytools",
-    ],
+    install_requires=requirements,
+    entry_points={
+        "console_scripts": [
+            "ipaytools-demo=ipaytools.core:quick_start_demo",
+        ],
+    },
 )

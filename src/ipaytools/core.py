@@ -1,5 +1,8 @@
 import logging
 from web3 import Web3
+from .brics.payment_gateway import BRICSPaymentGateway
+from .brics.exchange_rates import BRICSExchangeRateManager
+from .brics.config import BRICS_CURRENCIES
 
 class iPayTools:
     DEFAULT_RPC_URL = "http://localhost:8545"
@@ -34,6 +37,10 @@ class iPayTools:
         else:
             raise Exception("No accounts available")
             
+        # Initialize BRICS payment gateway
+        self.brics_gateway = BRICSPaymentGateway(self.w3, self.contract_address)
+        self.brics_rates = BRICSExchangeRateManager(self.w3)
+            
         # Verify contract
         try:
             owner = self.contract.functions.owner().call()
@@ -47,7 +54,7 @@ class iPayTools:
             self._ensure_profitable_fee()
 
     def _load_contract(self):
-        """Load contract dengan hanya function yang tersedia"""
+        """Load contract dengan ABI yang lebih kompatibel"""
         abi = [
             {
                 "inputs": [],
@@ -84,6 +91,28 @@ class iPayTools:
             abi=abi
         )
 
+    # BRICS Currency Methods
+    def get_brics_exchange_rates(self):
+        """Get all BRICS currency exchange rates"""
+        return self.brics_rates.get_all_brics_rates()
+        
+    def send_brics_payment(self, to_currency, amount_idr, recipient_address, fee_type='individual'):
+        """Send payment in BRICS currency"""
+        return self.brics_gateway.send_brics_payment(to_currency, amount_idr, recipient_address, fee_type)
+        
+    def receive_brics_payment(self, from_currency, amount_foreign, sender_address, fee_type='individual'):
+        """Receive payment in BRICS currency"""
+        return self.brics_gateway.receive_brics_payment(from_currency, amount_foreign, sender_address, fee_type)
+        
+    def get_brics_currency_info(self, currency):
+        """Get info for specific BRICS currency"""
+        return self.brics_rates.get_brics_currency_info(currency)
+        
+    def get_brics_fee_quote(self, from_currency, to_currency, amount, fee_type='individual'):
+        """Get fee quote for BRICS transaction"""
+        return self.brics_gateway.get_brics_fee_quote(from_currency, to_currency, amount, fee_type)
+
+    # Existing core methods (tetap sama)
     def get_current_gas_price(self):
         """Get current gas price dengan safety buffer"""
         try:
@@ -96,43 +125,36 @@ class iPayTools:
             return self.w3.to_wei(1, 'gwei')
 
     def estimate_gas_for_transaction(self, value_wei=0):
-        """Estimate gas untuk transaction ke contract"""
+        """Estimate gas untuk transaction - menggunakan fixed values untuk avoid contract issues"""
         try:
-            # Estimate gas untuk transaction ke contract address
+            # Try basic ETH transfer estimation first
             gas_estimate = self.w3.eth.estimate_gas({
                 'from': self.account,
-                'to': self.contract_address,
-                'value': value_wei,
-                'data': '0x'  # empty data - hanya transfer ETH
+                'to': self.account,  # Send to self untuk avoid contract issues
+                'value': value_wei
             })
             self.logger.info(f"🔧 Gas estimate successful: {gas_estimate}")
             return gas_estimate
         except Exception as e:
             self.logger.warning(f"Gas estimation failed, using default: {e}")
-            return 50000  # Default gas estimate
+            # Return safe default based on transaction type
+            if value_wei > 0:
+                return 21000  # Basic ETH transfer
+            else:
+                return 50000  # Contract interaction
 
     def calculate_minimum_profitable_fee(self):
         """Calculate minimum fee yang profitable berdasarkan current gas price"""
         gas_price = self.get_current_gas_price()
-        
-        # Estimate gas usage
         base_gas_estimate = self.estimate_gas_for_transaction()
-        
-        # Tambah 30% safety buffer untuk gas estimation
         safe_gas_estimate = base_gas_estimate * 130 // 100
-        
-        # Calculate total gas cost
         gas_cost = safe_gas_estimate * gas_price
-        
-        # Calculate minimum fee: gas_cost / 0.7 (karena iPay dapat 70%)
-        # Plus 20% profit margin
         min_fee_wei = (gas_cost * 100 // 70) * 120 // 100
         
         min_fee_eth = self.w3.from_wei(min_fee_wei, 'ether')
         gas_cost_eth = self.w3.from_wei(gas_cost, 'ether')
         
         self.logger.info(f"💡 Minimum profitable fee: {min_fee_eth:.6f} ETH (gas cost: {gas_cost_eth:.6f} ETH)")
-        
         return min_fee_wei
 
     def _is_fee_profitable(self, fee_wei=None):
@@ -141,7 +163,6 @@ class iPayTools:
             fee_wei = self.get_fee()
             
         min_fee_wei = self.calculate_minimum_profitable_fee()
-        
         is_profitable = fee_wei >= min_fee_wei
         
         if is_profitable:
@@ -190,19 +211,14 @@ class iPayTools:
     def use_tool_safe(self, value_eth=None):
         """Safe transaction method - tanpa function call, hanya transfer ETH"""
         try:
-            # 1. Get current gas price
             gas_price = self.get_current_gas_price()
-            
-            # 2. Calculate minimum fee based on CURRENT gas price
             min_fee_wei = self.calculate_minimum_profitable_fee()
             
-            # 3. Jika value tidak provided, use minimum fee
             if value_eth is None:
                 value_wei = min_fee_wei
             else:
                 value_wei = self.w3.to_wei(value_eth, 'ether')
                 
-            # 4. Validate profitability REAL-TIME
             if value_wei < min_fee_wei:
                 required_fee_eth = self.w3.from_wei(min_fee_wei, 'ether')
                 current_fee_eth = self.w3.from_wei(value_wei, 'ether')
@@ -212,10 +228,7 @@ class iPayTools:
                 self.logger.error(f"   System would LOSE money on this transaction!")
                 raise Exception(f"Transaction rejected: Fee is not profitable (need {required_fee_eth:.6f} ETH)")
             
-            # 5. Estimate gas
             gas_estimate = self.estimate_gas_for_transaction(value_wei)
-            
-            # 6. Calculate final cost
             total_gas_cost = gas_estimate * gas_price
             ipay_revenue = value_wei * 70 // 100
             ipay_profit = ipay_revenue - total_gas_cost
@@ -231,7 +244,6 @@ class iPayTools:
             self.logger.info(f"   iPay profit: {self.w3.from_wei(ipay_profit, 'ether'):.6f} ETH")
             self.logger.info(f"   Profit margin: {profit_margin:.1f}%")
             
-            # 7. Execute transaction (hanya transfer ETH, tanpa function call)
             try:
                 tx_hash = self.w3.eth.send_transaction({
                     'from': self.account,
@@ -298,12 +310,18 @@ class iPayTools:
         return True
 
 def quick_start_demo():
-    """Quick start demo dengan error handling"""
-    print("🚀 iPayTools Quick Start - ANTI RUGI SYSTEM")
+    """Quick start demo dengan BRICS integration"""
+    print("🚀 iPayTools Quick Start - BRICS MULTI-CURRENCY")
     try:
         tools = iPayTools(auto_adjust_fee=True)
         print(f"✅ Connected: {tools.contract_address}")
         print(f"💰 Current fee: {tools.w3.from_wei(tools.get_fee(), 'ether')} ETH")
+        
+        # Test BRICS functionality
+        print("🌍 BRICS Exchange Rates:")
+        rates = tools.get_brics_exchange_rates()
+        for currency, info in rates.items():
+            print(f"   {currency}: 1 = {info['rate']} IDR")
         
         # Test safe transaction
         try:

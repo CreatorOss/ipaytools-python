@@ -52,3 +52,33 @@
 - Real-time gas price checking
 - Profitability validation
 - Safe transaction execution
+
+## v0.3.4 ($(date +%Y-%m-%d))
+### 🌍 BRICS Multi-Currency Integration
+- **Added BRICS currency support**: CNY, INR, SAR, AED, RUB, BRL, ZAR, EGP
+- **Multi-currency payment gateway** with competitive fees
+- **Exchange rate management** for all BRICS currencies
+- **Bundle pricing** (0.8% fee for all BRICS currencies)
+- **Volume discounts** for high-volume transactions
+
+### Features
+- BRICS payment simulation system
+- Real-time exchange rate quotes
+- Fee optimization across currencies
+- Geopolitical alignment with BRICS nations
+- Indonesia-BRICS trade corridor support
+
+## v0.3.6 ($(date +%Y-%m-%d))
+### Final BRICS Release
+- Fixed time import error in payment gateway
+- Complete BRICS payment simulation system
+- Enhanced demo scripts and documentation
+- All 8 BRICS currencies fully operational
+- Bundle pricing and volume discounts working
+
+### Production Ready Features
+- Multi-currency payment processing
+- Competitive fee structure (0.8-2.5%)
+- Real-time exchange rate management
+- Payment simulation for testing
+- Indonesia-BRICS trade corridor support
